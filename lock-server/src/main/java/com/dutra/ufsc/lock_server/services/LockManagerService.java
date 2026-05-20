@@ -23,7 +23,6 @@ public class LockManagerService {
     // Fila de espera para cada recurso
     private final Map<String, Queue<CompletableFuture<Boolean>>> waitQueues = new ConcurrentHashMap<>();
 
-    // Tempo de lease padrão: 10 segundos
     private static final long LEASE_TIME_MS = 10000;
 
     public CompletableFuture<Boolean> acquireLock(String clientId, String resourceId) {
@@ -34,16 +33,14 @@ public class LockManagerService {
             LockState currentLock = locks.get(resourceId);
 
             if (currentLock == null) {
-                // Recurso livre, concede o lock
                 grantLock(clientId, resourceId);
-                replicateState(resourceId); // Chama os backups (Replicação)
+                replicateState(resourceId);
                 future.complete(true);
             } else if (currentLock.getOwnerClientId().equals(clientId)) {
-                // Cliente já tem o lock, apenas renova
                 renewLock(clientId, resourceId);
                 future.complete(true);
+
             } else {
-                // Recurso ocupado, coloca na fila
                 log.info("Recurso {} ocupado. Cliente {} na fila.", resourceId, clientId);
                 waitQueues.computeIfAbsent(resourceId, k -> new ConcurrentLinkedQueue<>()).add(future);
             }
@@ -57,14 +54,12 @@ public class LockManagerService {
             if (currentLock != null && currentLock.getOwnerClientId().equals(clientId)) {
                 locks.remove(resourceId);
                 log.info("Lock liberado pelo cliente {} para o recurso {}", clientId, resourceId);
-                replicateState(resourceId); // Replica a remoção
+                replicateState(resourceId);
 
-                // Acorda o próximo da fila
                 Queue<CompletableFuture<Boolean>> queue = waitQueues.get(resourceId);
+
                 if (queue != null && !queue.isEmpty()) {
                     CompletableFuture<Boolean> nextClient = queue.poll();
-                    // Aqui você precisaria de uma forma de saber quem era o cliente da fila
-                    // Uma melhoria é enfileirar um objeto que contenha o clientId e o Future.
                     nextClient.complete(true);
                 }
                 return true;
@@ -73,6 +68,51 @@ public class LockManagerService {
         return false;
     }
 
+    public boolean renewLock(String clientId, String resourceId) {
+        synchronized (resourceId.intern()) {
+            LockState currentLock = locks.get(resourceId);
+            if (currentLock != null && currentLock.getOwnerClientId().equals(clientId)) {
+                currentLock.setExpirationTimeMillis(System.currentTimeMillis() + LEASE_TIME_MS);
+                replicateState(resourceId);
+                log.info("Lease renovado para cliente {} no recurso {}", clientId, resourceId);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Controle de Leases ---
+    @Scheduled(fixedRate = 1000)
+    public void evictExpiredLocks() {
+        long now = System.currentTimeMillis();
+        for (Map.Entry<String, LockState> entry : locks.entrySet()) {
+            if (now > entry.getValue().getExpirationTimeMillis()) {
+                log.warn("Lease expirado para o recurso {}. Removendo lock.", entry.getKey());
+
+                // Simula que o próprio sistema chamou o unlock
+                unlock(entry.getValue().getOwnerClientId(), entry.getKey());
+            }
+        }
+    }
+
+    private void replicateState(String resourceId) {
+        // Implementar chamada RestTemplate/WebClient para os URLs de BACKUPS
+        // enviando o estado atual de 'locks.get(resourceId)'
+    }
+
+    private void grantLock(String clientId, String resourceId) {
+        LockState newLock = new LockState();
+        newLock.setResourceId(resourceId);
+        newLock.setOwnerClientId(clientId);
+
+        // Momento exato em que o lock vai expirar se não for renovado
+        newLock.setExpirationTimeMillis(System.currentTimeMillis() + LEASE_TIME_MS);
+
+        // Registra o lock na memória do servidor
+        locks.put(resourceId, newLock);
+
+        log.info("Lock concedido: Cliente {} adquiriu o recurso {}", clientId, resourceId);
+    }
 
 
 }
