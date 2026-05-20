@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  # --- SERVIDORES DE LOCK ---
+  lock-server-primary:
+    build: ./lock-server
+    environment:
+      - SERVER_PORT=8080
+      - ROLE=PRIMARY
+      - BACKUPS=http://lock-server-backup1:8080,http://lock-server-backup2:8080
+    ports:
+      - "8080:8080"
+
+  lock-server-backup1:
+    build: ./lock-server
+    environment:
+      - SERVER_PORT=8080
+      - ROLE=BACKUP
+
+  lock-server-backup2:
+    build: ./lock-server
+    environment:
+      - SERVER_PORT=8080
+      - ROLE=BACKUP
+
+  # --- CLIENTES (GERADORES DE CARGA) ---
+  client-1:
+    build: ./lock-client
+    environment:
+      - CLIENT_ID=C1
+      - SERVER_URL=http://lock-server-primary:8080
+    depends_on:
+      - lock-server-primary
+
+  client-2:
+    build: ./lock-client
+    environment:
+      - CLIENT_ID=C2
+      - SERVER_URL=http://lock-server-primary:8080
+    depends_on:
+      - lock-server-primary
+
+  client-3:
+    build: ./lock-client
+    environment:
+      - CLIENT_ID=C3
+      - SERVER_URL=http://lock-server-primary:8080
+    depends_on:
+      - lock-server-primary
