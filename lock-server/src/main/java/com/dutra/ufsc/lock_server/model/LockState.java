@@ -1,13 +1,16 @@
 package com.dutra.ufsc.lock_server.model;
 
 public class LockState {
+
     private String resourceId;
     private String ownerClientId;
     private long expirationTimeMillis;
 
     public LockState() {}
 
-    public LockState(String resourceId, String ownerClientId, long expirationTimeMillis) {
+    public LockState(String resourceId,
+                     String ownerClientId,
+                     long expirationTimeMillis) {
         this.resourceId = resourceId;
         this.ownerClientId = ownerClientId;
         this.expirationTimeMillis = expirationTimeMillis;
