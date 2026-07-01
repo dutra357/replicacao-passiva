@@ -83,6 +83,30 @@ public class LockService {
         }
     }
 
+    public boolean renew(String resourceId, String clientId) {
+        LockInfo lock = locks.get(resourceId);
+
+        if (lock != null && lock.clientId.equals(clientId)) {
+
+            lock.expirationTime = System.currentTimeMillis() + LEASE_DURATION_MS;
+
+            System.out.printf("♻️ [%s] LEASE RENOVADO para '%s' pelo cliente %s (+10s)%n", serverId, resourceId, clientId);
+            return true;
+        }
+
+        System.out.printf("❌ [%s] RENEW NEGADO para '%s'. %s não possui o lock ou já expirou.%n", serverId, resourceId, clientId);
+        return false;
+    }
+
+    public void syncRenew(String resourceId, String clientId) {
+        LockInfo lock = locks.get(resourceId);
+
+        if (lock != null && lock.clientId.equals(clientId)) {
+            lock.expirationTime = System.currentTimeMillis() + LEASE_DURATION_MS;
+            System.out.printf("🔄 [%s] BACKUP SINCRONIZADO (RENEW): recurso '%s' (+10s)%n", serverId, resourceId);
+        }
+    }
+
     @Scheduled(fixedRate = 3000)
     public void evictExpiredLocks() {
 

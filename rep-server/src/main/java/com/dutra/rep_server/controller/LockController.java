@@ -25,8 +25,7 @@ public class LockController {
         this.serverList = Arrays.asList(System.getenv("SERVER_LIST").split(","));
     }
 
-    // --- Endpoints para os Clientes ---
-
+    // ENDPOINTS DE CLIENTES
     @PostMapping("/{resourceId}")
     public boolean acquireLock(@PathVariable String resourceId, @RequestParam String clientId) {
 
@@ -49,16 +48,16 @@ public class LockController {
 
         boolean released = lockService.unlock(resourceId, clientId);
 
-        // Se a liberação foi legítima, replica a exclusão para os backups
+        // Replica para backup apenas se liberado com sucesso (legitimo)
         if (released) {
             replicateUnlockToBackups(resourceId);
         }
     }
 
-    // --- Lógica de Replicação Passiva ---
-
     private void replicateLockToBackups(String resourceId, String clientId) {
+
         System.out.printf("🔄 [%s] Sincronizando estado (LOCK) com backups...%n", serverId);
+
         for (String node : serverList) {
             if (!node.contains(System.getenv("SERVER_ID"))) { // Ignora a si mesmo
                 try {
@@ -74,7 +73,9 @@ public class LockController {
     }
 
     private void replicateUnlockToBackups(String resourceId) {
+
         System.out.printf("🔄 [%s] Sincronizando estado (UNLOCK) com backups...%n", serverId);
+
         for (String node : serverList) {
             if (!node.contains(System.getenv("SERVER_ID"))) { // Ignora a si mesmo
                 try {
@@ -89,8 +90,43 @@ public class LockController {
         }
     }
 
-    // --- Endpoints de Sincronização Interna (Chamados pelo Primary) ---
+    @PutMapping("/{resourceId}/renew")
+    public boolean renewLock(@PathVariable String resourceId, @RequestParam String clientId) {
 
+        if (lockService.isCrashed()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Simulação de falha isolada.");
+        }
+        System.out.printf("👑 [%s] (PRIMARY) Requisição de RENEW de %s para '%s'.%n", serverId, clientId, resourceId);
+
+        boolean renewed = lockService.renew(resourceId, clientId);
+
+        if (renewed) {
+            replicateRenewToBackups(resourceId, clientId);
+        }
+        return renewed;
+    }
+
+    private void replicateRenewToBackups(String resourceId, String clientId) {
+
+        System.out.printf("🔄 [%s] Sincronizando estado (RENEW) com backups...%n", serverId);
+
+        for (String node : serverList) {
+            if (!node.contains(System.getenv("SERVER_ID"))) {
+
+                try {
+                    restClient.put()
+                            .uri(node + "/api/lock/" + resourceId + "/renew/sync?clientId=" + clientId)
+                            .retrieve()
+                            .toBodilessEntity();
+
+                } catch (Exception e) {
+                    System.out.printf("⚠️ [%s] Falha ao sincronizar RENEW com backup %s%n", serverId, node);
+                }
+            }
+        }
+    }
+
+    // ENDPOINTS PARA SERVIDORES
     @PostMapping("/{resourceId}/sync")
     public void syncLock(@PathVariable String resourceId, @RequestParam String clientId) {
         if (lockService.isCrashed()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
@@ -111,5 +147,11 @@ public class LockController {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
         }
         return lockService.exportState();
+    }
+
+    @PutMapping("/{resourceId}/renew/sync")
+    public void syncRenewLock(@PathVariable String resourceId, @RequestParam String clientId) {
+        if (lockService.isCrashed()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
+        lockService.syncRenew(resourceId, clientId);
     }
 }

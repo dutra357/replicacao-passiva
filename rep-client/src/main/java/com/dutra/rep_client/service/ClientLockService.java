@@ -109,6 +109,64 @@ public class ClientLockService {
         }
     }
 
+    public void solicitarLockComOperacaoLonga(String resourceId) {
+
+        System.out.printf("🟢 [%s] Solicitando LOCK (Operação Longa) para '%s'...%n", clientId, resourceId);
+
+        boolean granted = false;
+
+        while (!granted) {
+            granted = tentarAdquirir(resourceId);
+            if (granted) {
+                System.out.printf("🔐 [%s] Operação longa iniciada. Precisará de RENEW no meio do caminho...%n", clientId);
+
+                simularProcessamento(6000);
+
+                renovarLock(resourceId);
+
+                simularProcessamento(6000);
+                liberarLock(resourceId);
+
+            } else {
+                System.out.printf("⏳ [%s] Na fila de espera. Retentando em 3s...%n", clientId);
+                simularProcessamento(3000);
+            }
+        }
+    }
+
+    public boolean renovarLock(String resourceId) {
+
+        System.out.printf("♻️ [%s] Solicitando RENOVAÇÃO (RENEW) para '%s'...%n", clientId, resourceId);
+
+        int attempts = 0;
+
+        while (attempts < servers.size()) {
+            String leaderUrl = servers.get(currentLeaderIndex);
+
+            try {
+                Boolean granted = restClient.put()
+                        .uri(leaderUrl + "/api/lock/" + resourceId + "/renew?clientId=" + clientId)
+                        .retrieve()
+                        .body(Boolean.class);
+
+                if (Boolean.TRUE.equals(granted)) {
+                    System.out.printf("✅ [%s] Lock renovado com sucesso! Mais tempo de processamento garantido.%n", clientId);
+                    return true;
+
+                } else {
+                    System.out.printf("⚠️ [%s] Servidor recusou a renovação.%n", clientId);
+                    return false;
+                }
+
+            } catch (RestClientException e) {
+                System.out.printf("💥 [%s] Primary (%s) caiu ao tentar renovar! Timeout.%n", clientId, leaderUrl);
+                currentLeaderIndex = (currentLeaderIndex + 1) % servers.size();
+                attempts++;
+            }
+        }
+        return false;
+    }
+
     private void simularProcessamento(int tempoMs) {
         try { Thread.sleep(tempoMs); }
         catch (InterruptedException e) { Thread.currentThread().interrupt(); }
