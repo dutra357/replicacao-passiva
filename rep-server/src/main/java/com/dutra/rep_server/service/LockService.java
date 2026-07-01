@@ -43,24 +43,31 @@ public class LockService {
     }
 
     public boolean tryLock(String resourceId, String clientId) {
-
         LockInfo currentLock = locks.get(resourceId);
+        Queue<String> queue = waitQueue.computeIfAbsent(resourceId, k -> new LinkedList<>());
+
+        if (!queue.contains(clientId)) {
+            queue.add(clientId);
+            System.out.printf("⏳ [%s] Cliente %s entrou na posição %d da fila para '%s'.%n",
+                    serverId, clientId, queue.size(), resourceId);
+        }
 
         if (currentLock == null || System.currentTimeMillis() > currentLock.expirationTime) {
 
-            locks.put(resourceId, new LockInfo(clientId, LEASE_DURATION_MS));
+            if (clientId.equals(queue.peek())) {
+                locks.put(resourceId, new LockInfo(clientId, LEASE_DURATION_MS));
+                queue.poll();
 
-            System.out.printf("✅ [%s] LOCK CONCEDIDO para '%s' (Cliente: %s). Lease: 10s%n", serverId, resourceId, clientId);
-
-            Queue<String> queue = waitQueue.get(resourceId);
-            if (queue != null) queue.remove(clientId);
-            return true;
+                System.out.printf("✅ [%s] LOCK DEFERIDO para '%s' (Cliente: %s). Lease: 10s%n", serverId, resourceId, clientId);
+                return true;
+            } else {
+                System.out.printf("⛔ [%s] LOCK NEGADO para '%s'. Recurso livre, mas %s não é o primeiro da fila.%n", serverId, resourceId, clientId);
+                return false;
+            }
         }
-
 
         if (!currentLock.clientId.equals(clientId)) {
             System.out.printf("⛔ [%s] LOCK NEGADO para '%s'. Em uso por '%s'.%n", serverId, resourceId, currentLock.clientId);
-            waitQueue.computeIfAbsent(resourceId, k -> new LinkedList<>()).add(clientId);
             return false;
         }
 
