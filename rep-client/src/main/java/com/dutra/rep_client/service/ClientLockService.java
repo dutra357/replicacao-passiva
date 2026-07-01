@@ -16,6 +16,7 @@ public class ClientLockService {
 
     public void solicitarLock(String resourceId) {
 
+        this.currentLeaderIndex = 0;
         System.out.printf("🟢 [%s] Solicitando LOCK para '%s'...%n", clientId, resourceId);
 
         boolean granted = false;
@@ -40,6 +41,7 @@ public class ClientLockService {
     // Falha de cliebnt
     public void solicitarLockComFalhaSimulada(String resourceId) {
 
+        this.currentLeaderIndex = 0;
         boolean granted = tentarAdquirir(resourceId);
 
         if (granted) {
@@ -49,6 +51,7 @@ public class ClientLockService {
 
     public void tentarLiberarIndevidamente(String resourceId, String alvoId) {
 
+        this.currentLeaderIndex = 0;
         System.out.printf("🏴‍☠️ [%s] TESTE: Tentando liberar lock de outro cliente %s!%n", clientId, alvoId);
 
         String leaderUrl = servers.get(currentLeaderIndex);
@@ -66,6 +69,7 @@ public class ClientLockService {
 
     private boolean tentarAdquirir(String resourceId) {
 
+        this.currentLeaderIndex = 0;
         int attempts = 0;
 
         while (attempts < servers.size()) {
@@ -94,6 +98,7 @@ public class ClientLockService {
 
     private void liberarLock(String resourceId) {
 
+        this.currentLeaderIndex = 0;
         String leaderUrl = servers.get(currentLeaderIndex);
 
         try {
@@ -111,6 +116,7 @@ public class ClientLockService {
 
     public void solicitarLockComOperacaoLonga(String resourceId) {
 
+        this.currentLeaderIndex = 0;
         System.out.printf("🟢 [%s] Solicitando LOCK (Operação Longa) para '%s'...%n", clientId, resourceId);
 
         boolean granted = false;
@@ -136,6 +142,7 @@ public class ClientLockService {
 
     public boolean renovarLock(String resourceId) {
 
+        this.currentLeaderIndex = 0;
         System.out.printf("♻️ [%s] Solicitando RENOVAÇÃO (RENEW) para '%s'...%n", clientId, resourceId);
 
         int attempts = 0;
@@ -170,6 +177,7 @@ public class ClientLockService {
 
     public void consultarStatus(String resourceId) {
 
+        this.currentLeaderIndex = 0;
         String leaderUrl = servers.get(currentLeaderIndex);
 
         try {
