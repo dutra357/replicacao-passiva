@@ -126,6 +126,16 @@ public class LockController {
         }
     }
 
+    @GetMapping("/{resourceId}/status")
+    public String getLockStatus(@PathVariable String resourceId) {
+
+        if (lockService.isCrashed()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Simulação de falha isolada.");
+        }
+
+        return lockService.getStatus(resourceId);
+    }
+
     // ENDPOINTS PARA SERVIDORES
     @PostMapping("/{resourceId}/sync")
     public void syncLock(@PathVariable String resourceId, @RequestParam String clientId) {

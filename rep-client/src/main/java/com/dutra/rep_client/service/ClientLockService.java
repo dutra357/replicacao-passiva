@@ -167,6 +167,26 @@ public class ClientLockService {
         return false;
     }
 
+
+    public void consultarStatus(String resourceId) {
+
+        String leaderUrl = servers.get(currentLeaderIndex);
+
+        try {
+            String status = restClient.get()
+                    .uri(leaderUrl + "/api/lock/" + resourceId + "/status")
+                    .retrieve()
+                    .body(String.class);
+
+            System.out.printf("📊 [%s] STATUS de '%s': %s%n", clientId, resourceId, status);
+
+        } catch (RestClientException e) {
+            System.out.printf("⚠️ [%s] Falha ao consultar status. Primary (%s) inoperante.%n", clientId, leaderUrl);
+
+            currentLeaderIndex = (currentLeaderIndex + 1) % servers.size();
+        }
+    }
+
     private void simularProcessamento(int tempoMs) {
         try { Thread.sleep(tempoMs); }
         catch (InterruptedException e) { Thread.currentThread().interrupt(); }

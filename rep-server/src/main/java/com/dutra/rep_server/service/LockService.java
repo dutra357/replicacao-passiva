@@ -107,6 +107,22 @@ public class LockService {
         }
     }
 
+    public String getStatus(String resourceId) {
+
+        LockInfo lock = locks.get(resourceId);
+
+        Queue<String> queue = waitQueue.get(resourceId);
+        int queueSize = (queue != null) ? queue.size() : 0;
+
+        if (lock == null || System.currentTimeMillis() > lock.expirationTime) {
+            return String.format("LIVRE (Fila de espera: %d)", queueSize);
+
+        } else {
+            long tempoRestante = (lock.expirationTime - System.currentTimeMillis()) / 1000;
+            return String.format("BLOQUEADO por '%s' (Expira em %ds | Fila: %d)", lock.clientId, tempoRestante, queueSize);
+        }
+    }
+
     @Scheduled(fixedRate = 3000)
     public void evictExpiredLocks() {
 
