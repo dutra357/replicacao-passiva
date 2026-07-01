@@ -1,166 +1,33 @@
-#################################################
-# Compilação / Build
-#################################################
+HELP.md
 target/
-build/
-out/
-bin/
-
-#################################################
-# Maven
-#################################################
 .mvn/wrapper/maven-wrapper.jar
-.mvn/timing.properties
+!**/src/main/**/target/
+!**/src/test/**/target/
 
-#################################################
-# Gradle
-#################################################
-.gradle/
-!gradle/wrapper/gradle-wrapper.jar
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
 
-#################################################
-# Java
-#################################################
-*.class
-*.jar
-*.war
-*.ear
-*.nar
-*.zip
-*.tar.gz
-*.rar
-hs_err_pid*
-replay_pid*
-
-#################################################
-# Logs
-#################################################
-*.log
-logs/
-log/
-*.out
-
-#################################################
-# Spring Boot
-#################################################
-application-local.yml
-application-local.yaml
-application-local.properties
-
-application-dev.yml
-application-dev.yaml
-application-dev.properties
-
-application-prod.yml
-application-prod.yaml
-application-prod.properties
-
-.env
-.env.*
-
-#################################################
-# Banco de Dados
-#################################################
-*.db
-*.mv.db
-*.trace.db
-*.h2.db
-*.sqlite
-*.sqlite3
-
-#################################################
-# IDE - IntelliJ IDEA
-#################################################
-.idea/
-*.iml
+### IntelliJ IDEA ###
+.idea
 *.iws
+*.iml
 *.ipr
 
-#################################################
-# IDE - Eclipse
-#################################################
-.project
-.classpath
-.settings/
-.factorypath
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
 
-#################################################
-# IDE - VS Code
-#################################################
+### VS Code ###
 .vscode/
-
-#################################################
-# IDE - NetBeans
-#################################################
-nbproject/private/
-nbbuild/
-dist/
-nbdist/
-.nb-gradle/
-
-#################################################
-# Sistema Operacional
-#################################################
-.DS_Store
-Thumbs.db
-Desktop.ini
-ehthumbs.db
-Icon?
-
-#################################################
-# Linux
-#################################################
-*~
-
-#################################################
-# Arquivos Temporários
-#################################################
-*.tmp
-*.temp
-*.swp
-*.swo
-*.bak
-
-#################################################
-# Cobertura de Testes
-#################################################
-coverage/
-jacoco.exec
-jacoco/
-site/
-surefire-reports/
-failsafe-reports/
-
-#################################################
-# SonarQube
-#################################################
-.sonar/
-
-#################################################
-# Dependências Locais
-#################################################
-dependency-reduced-pom.xml
-
-#################################################
-# Arquivos Sensíveis
-#################################################
-*.pem
-*.key
-*.p12
-*.jks
-*.keystore
-
-#################################################
-# Docker
-#################################################
-docker-compose.override.yml
-
-#################################################
-# Kubernetes
-#################################################
-*.kubeconfig
-
-#################################################
-# Arquivos de Cache
-#################################################
-.cache/
