@@ -20,19 +20,20 @@ public class GeradorDeCarga {
         this.lockService = lockService;
     }
 
-    @Scheduled(initialDelay = 5000, fixedDelay = 15000)
+    @Scheduled(initialDelay = 5000, fixedDelay = 10000)
     public void executarCarga() {
 
         String resource = recursos[random.nextInt(recursos.length)];
 
         if (clientId.equals("client-1")) {
             if (random.nextBoolean()) {
-
-                // 50% para rodar a operação longa que exige renovação (RENEW)
+                // 50% de chance para rodar a operação longa que exige renovação
+                System.out.printf("🎬 [%s] DEMONSTRAÇÃO: Iniciando operação longa em '%s' (Testando RENEW)%n", clientId, resource);
                 lockService.solicitarLockComOperacaoLonga(resource);
 
             } else {
                 // 50% de chance para lock normal
+                System.out.printf("🎬 [%s] DEMONSTRAÇÃO: Requisição normal de Lock em '%s'%n", clientId, resource);
                 lockService.solicitarLock(resource);
             }
 
@@ -41,24 +42,33 @@ public class GeradorDeCarga {
             double chance = random.nextDouble();
 
             if (chance < 0.6) {
+                // 60% para concorrencia de outro lock
                 String alvoId = random.nextBoolean() ? "client-1" : "client-3";
+                System.out.printf("🎬 [%s] FALHA - Tentativa de liberar '%s' (LOCK para %s)%n", clientId, resource, alvoId);
                 lockService.tentarLiberarIndevidamente(resource, alvoId);
 
             } else if (chance < 0.8) {
+                // 20% para crash
+                System.out.printf("🎬 [%s] FALHA - Crash stop após reter '%s' (Testando LEASE)%n", clientId, resource);
                 lockService.solicitarLockComFalhaSimulada(resource);
+
             } else {
+                // 20% para operação normal
+                System.out.printf("🎬 [%s] Requisição normal de Lock em '%s'%n", clientId, resource);
                 lockService.solicitarLock(resource);
             }
 
         } else if (clientId.equals("client-3")) {
 
-            // Sempre consulta o status atual do recurso escolhido antes de agir
+            System.out.printf("🎬 [%s] Consultando Status de '%s'%n", clientId, resource);
             lockService.consultarStatus(resource);
 
             if (random.nextDouble() < 0.3) {
+                System.out.printf("🎬 [%s] FALHA - Tentativa de liberar '%s' (LOCK para o client-2)%n", clientId, resource);
                 lockService.tentarLiberarIndevidamente(resource, "client-2");
             }
 
+            System.out.printf("🎬 [%s] Requisição de Lock em '%s' após análise de status de LOCK.%n", clientId, resource);
             lockService.solicitarLock(resource);
         }
     }
