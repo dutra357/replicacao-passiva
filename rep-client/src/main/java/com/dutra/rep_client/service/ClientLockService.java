@@ -14,70 +14,84 @@ public class ClientLockService {
     private int currentLeaderIndex = 0;
     private final RestClient restClient = RestClient.create();
 
+    // Fluxo normal com Fila de Espera (Polling)
     public void solicitarLock(String resourceId) {
-        System.out.printf("🟢 [%s] Solicitou LOCK para '%s'%n", clientId, resourceId);
+        System.out.printf("🟢 [%s] Solicitando LOCK para '%s'...%n", clientId, resourceId);
+        boolean granted = false;
 
-        boolean success = false;
+        // REQUISITO 9: Aguarda ativamente na fila de espera até conseguir
+        while (!granted) {
+            granted = tentarAdquirir(resourceId);
+            if (granted) {
+                System.out.printf("🔐 [%s] Operando no recurso '%s'...%n", clientId, resourceId);
+                simularProcessamento(4000);
+                liberarLock(resourceId);
+            } else {
+                System.out.printf("⏳ [%s] Na fila de espera. Retentando em 3s...%n", clientId);
+                simularProcessamento(3000); // Aguarda antes de tentar de novo
+            }
+        }
+    }
+
+    // REQUISITO 7: Simula falha do cliente (Pega o lock e "morre")
+    public void solicitarLockComFalhaSimulada(String resourceId) {
+        System.out.printf("😈 [%s] MODO CAOS: Tentando pegar o lock e sumir (Simular Crash)...%n", clientId);
+        boolean granted = tentarAdquirir(resourceId);
+        if (granted) {
+            System.out.printf("💥 [%s] CRASH SIMULADO! Morri com o lock do '%s' na mão!%n", clientId, resourceId);
+            // NÃO chama o liberarLock(), forçando o servidor a usar o Lease
+        }
+    }
+
+    // REQUISITO 7: Simula ataque (Tenta liberar lock dos outros)
+    public void tentarLiberarIndevidamente(String resourceId, String alvoId) {
+        System.out.printf("🏴‍☠️ [%s] MODO CAOS: Tentando roubar/liberar lock do %s!%n", clientId, alvoId);
+        String leaderUrl = servers.get(currentLeaderIndex);
+        try {
+            restClient.delete()
+                    .uri(leaderUrl + "/api/lock/" + resourceId + "?clientId=" + clientId)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (Exception e) {
+            System.out.printf("⚠️ [%s] Falha de rede ao tentar ataque.%n", clientId);
+        }
+    }
+
+    private boolean tentarAdquirir(String resourceId) {
         int attempts = 0;
-
-        while (!success && attempts < servers.size()) {
+        while (attempts < servers.size()) {
             String leaderUrl = servers.get(currentLeaderIndex);
             try {
                 Boolean granted = restClient.post()
                         .uri(leaderUrl + "/api/lock/" + resourceId + "?clientId=" + clientId)
                         .retrieve()
                         .body(Boolean.class);
-
-                success = true; // Comunicação bem sucedida com o Primary
-
-                if (Boolean.TRUE.equals(granted)) {
-                    System.out.printf("🔐 [%s] Operando no recurso '%s' com sucesso!%n", clientId, resourceId);
-
-                    // 1. Simula a retenção do lock por um tempo
-                    simularProcessamento();
-
-                    // 2. Libera o lock após o uso
-                    liberarLock(resourceId, leaderUrl);
-                } else {
-                    System.out.printf("⏳ [%s] Recurso ocupado. Aguardando na fila...%n", clientId);
-                }
-
+                return Boolean.TRUE.equals(granted);
             } catch (RestClientException e) {
-                System.out.printf("💥 [%s] Falha ao contatar Primary (%s). Timeout/Erro de Conexão!%n", clientId, leaderUrl);
-
-                // Substituição de líder em caso de falha de comunicação
+                System.out.printf("💥 [%s] Primary (%s) caiu! Timeout.%n", clientId, leaderUrl);
                 currentLeaderIndex = (currentLeaderIndex + 1) % servers.size();
-                System.out.printf("🔍 [%s] Substituição de líder. Tentando próximo servidor: %s...%n", clientId, servers.get(currentLeaderIndex));
+                System.out.printf("🔍 [%s] Failover: Tentando %s...%n", clientId, servers.get(currentLeaderIndex));
                 attempts++;
             }
         }
-
-        if (!success) {
-            System.out.printf("💀 [%s] SISTEMA INDISPONÍVEL. Nenhum servidor respondeu.%n", clientId);
-        }
+        return false;
     }
 
-    private void simularProcessamento() {
-        try {
-            // Segura o lock por 5 segundos para evidenciar a concorrência no terminal
-            Thread.sleep(5000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            System.out.printf("⚠️ [%s] Operação simulada foi interrompida.%n", clientId);
-        }
+    private void simularProcessamento(int tempoMs) {
+        try { Thread.sleep(tempoMs); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
     }
 
-    private void liberarLock(String resourceId, String leaderUrl) {
+    private void liberarLock(String resourceId) {
+        String leaderUrl = servers.get(currentLeaderIndex);
         try {
-            // Chama o endpoint HTTP DELETE no servidor para liberar o recurso
             restClient.delete()
                     .uri(leaderUrl + "/api/lock/" + resourceId + "?clientId=" + clientId)
                     .retrieve()
                     .toBodilessEntity();
-
-            System.out.printf("🔓 [%s] LOCK liberado com sucesso em '%s'.%n", clientId, resourceId);
-        } catch (RestClientException e) {
-            System.out.printf("❌ [%s] Erro ao tentar liberar o LOCK no servidor %s.%n", clientId, leaderUrl);
+            System.out.printf("🔓 [%s] Lock liberado honestamente.%n", clientId);
+        } catch (Exception e) {
+            System.out.printf("❌ [%s] Erro ao liberar o LOCK.%n", clientId);
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.dutra.rep_server.service;
 
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Queue;
@@ -8,48 +9,96 @@ import java.util.LinkedList;
 @Service
 public class LockService {
 
-    // Mapa de recurso_id -> cliente_id atual
-    private final ConcurrentHashMap<String, String> locks = new ConcurrentHashMap<>();
-    // Fila de espera por recurso
+    // controle de Lease
+    private static class LockInfo {
+        String clientId;
+        long expirationTime;
+
+        LockInfo(String clientId, long durationMs) {
+            this.clientId = clientId;
+            this.expirationTime = System.currentTimeMillis() + durationMs;
+        }
+    }
+
+    private final ConcurrentHashMap<String, LockInfo> locks = new ConcurrentHashMap<>();
+
     private final ConcurrentHashMap<String, Queue<String>> waitQueue = new ConcurrentHashMap<>();
+
     private final String serverId = System.getenv("SERVER_ID");
 
-    public boolean tryLock(String resourceId, String clientId) {
-        if (locks.putIfAbsent(resourceId, clientId) == null) {
-            System.out.printf("✅ [%s] LOCK DEFERIDO para '%s' (Cliente: %s)%n", serverId, resourceId, clientId);
+    private final long LEASE_DURATION_MS = 10000;
 
-            // Remove o cliente da fila de espera, caso estivesse nela
+    private volatile boolean crashed = false;
+
+    public boolean isCrashed() { return crashed; }
+
+    public void setCrashed(boolean crashed) { this.crashed = crashed; }
+
+    public java.util.Map<String, String> exportState() {
+        java.util.Map<String, String> snapshot = new java.util.HashMap<>();
+        locks.forEach((resource, info) -> snapshot.put(resource, info.clientId));
+        return snapshot;
+    }
+
+    public void importState(java.util.Map<String, String> activeLocks) {
+        locks.clear();
+        activeLocks.forEach((resource, client) -> {
+
+            locks.put(resource, new LockInfo(client, LEASE_DURATION_MS));
+        });
+        System.out.printf("🔄 [%s] Memória de locks reconstruída com sucesso após falha.%n", serverId);
+    }
+
+    public boolean tryLock(String resourceId, String clientId) {
+        LockInfo currentLock = locks.get(resourceId);
+
+        // Se está livre ou o lock atual já expirou
+        if (currentLock == null || System.currentTimeMillis() > currentLock.expirationTime) {
+            locks.put(resourceId, new LockInfo(clientId, LEASE_DURATION_MS));
+            System.out.printf("✅ [%s] LOCK DEFERIDO para '%s' (Cliente: %s). Lease: 10s%n", serverId, resourceId, clientId);
+
             Queue<String> queue = waitQueue.get(resourceId);
-            if (queue != null) {
-                queue.remove(clientId);
-            }
+            if (queue != null) queue.remove(clientId); // Tira da fila se estava nela
             return true;
         }
 
-        System.out.printf("⛔ [%s] LOCK NEGADO para '%s'. Em uso por '%s'.%n", serverId, resourceId, locks.get(resourceId));
-        waitQueue.computeIfAbsent(resourceId, k -> new LinkedList<>()).add(clientId);
-        System.out.printf("⏳ [%s] Cliente %s adicionado à fila do recurso '%s'%n", serverId, clientId, resourceId);
-        return false;
+        // Se já está locado por outro e ainda é válido
+        if (!currentLock.clientId.equals(clientId)) {
+            System.out.printf("⛔ [%s] LOCK NEGADO para '%s'. Em uso por '%s'.%n", serverId, resourceId, currentLock.clientId);
+            waitQueue.computeIfAbsent(resourceId, k -> new LinkedList<>()).add(clientId);
+            return false;
+        }
+
+        return true; // Se o próprio cliente pedir de novo, é ignorado/mantido
     }
 
     public boolean unlock(String resourceId, String clientId) {
-        // Valida se quem está tentando liberar é realmente o dono do lock
-        if (clientId.equals(locks.get(resourceId))) {
+        LockInfo lock = locks.get(resourceId);
+        if (lock != null && lock.clientId.equals(clientId)) {
             locks.remove(resourceId);
-            System.out.printf("🔓 [%s] LOCK LIBERADO de '%s' pelo cliente %s%n", serverId, resourceId, clientId);
+            System.out.printf("🔓 [%s] LOCK LIBERADO de '%s' pelo dono (%s)%n", serverId, resourceId, clientId);
             return true;
         } else {
-            System.out.printf("❌ [%s] TENTATIVA INVÁLIDA: %s tentou liberar lock de terceiros em '%s'%n", serverId, clientId, resourceId);
+            // REQUISITO 7: tentativa de liberação de lock por um cliente que não é o proprietário
+            System.out.printf("❌ [%s] ALERTA DE SEGURANÇA: %s tentou liberar lock de terceiros em '%s'%n", serverId, clientId, resourceId);
             return false;
         }
     }
 
-    // -----------------------------------------------------------------
-    // Métodos para receber o estado do Primary (Replicação Passiva)
-    // -----------------------------------------------------------------
+    // REQUISITO 5: Limpeza automática de locks expirados (Roda a cada 3 segundos)
+    @Scheduled(fixedRate = 3000)
+    public void evictExpiredLocks() {
+        long now = System.currentTimeMillis();
+        locks.forEach((resource, lockInfo) -> {
+            if (now > lockInfo.expirationTime) {
+                locks.remove(resource);
+                System.out.printf("⏰ [%s] LEASE EXPIRADO! Recurso '%s' abandonado por '%s' foi revogado.%n", serverId, resource, lockInfo.clientId);
+            }
+        });
+    }
 
     public void syncLock(String resourceId, String clientId) {
-        locks.put(resourceId, clientId);
+        locks.put(resourceId, new LockInfo(clientId, LEASE_DURATION_MS));
         System.out.printf("🔄 [%s] BACKUP SINCRONIZADO (LOCK): recurso '%s' -> %s%n", serverId, resourceId, clientId);
     }
 
