@@ -5,6 +5,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -23,54 +24,61 @@ public class SimuladorFalhaServidor {
         this.myServerId = System.getenv("SERVER_ID");
     }
 
-    // Dispara após 30s de sistema no ar
     @Scheduled(initialDelay = 30000, fixedDelay = 120000)
     public void simularQuedaERecuperacao() {
-
-        // Se a variável por algum motivo for nula, ou NÃO for o server-1, aborta silenciosamente.
-        // O trim() remove espaços extras e equalsIgnoreCase ignora maiúsculas/minúsculas.
         if (myServerId == null || !myServerId.trim().equalsIgnoreCase("server-1")) {
             return;
         }
 
-        System.out.printf("💥💥💥 [%s] MODO CAOS: Partição de rede! O servidor ficará inoperante por 10s...%n", myServerId);
-        lockService.setCrashed(true); // Isola o servidor logicamente bloqueando o Controller
+        System.out.printf("💥💥💥 [%s] MODO CAOS: Isolando servidor do cluster por 10s (Simulação de Pane)...%n", myServerId);
+        lockService.setCrashed(true);
 
         try {
-            Thread.sleep(10000); // 10 segundos de indisponibilidade
+            Thread.sleep(10000);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
 
-        System.out.printf("🔌 [%s] Rede restabelecida. Buscando estado autoritativo do cluster...%n", myServerId);
+        System.out.printf("🔌 [%s] Rede restaurada. Iniciando Varredura Consensual de Estado...%n", myServerId);
 
-        boolean recuperado = false;
-        // Pede os locks atuais para os outros servidores sobreviventes (server-2 ou server-3)
+        Map<String, Object> vencedorState = null;
+        long maiorVersaoEncontrada = -1;
+        String noVencedor = "Nenhum";
+
+        // Coleta e compara as versões de todos os nós sobreviventes do cluster
         for (String node : servers) {
             if (!node.contains(myServerId)) {
                 try {
-                    Map<String, String> activeLocks = restClient.get()
+                    Map<String, Object> nodeState = restClient.get()
                             .uri(node + "/api/lock/state")
                             .retrieve()
-                            .body(new ParameterizedTypeReference<Map<String, String>>() {});
+                            .body(new ParameterizedTypeReference<Map<String, Object>>() {});
 
-                    if (activeLocks != null) {
-                        lockService.importState(activeLocks);
-                        System.out.printf("✅ [%s] Estado sincronizado a partir de %s.%n", myServerId, node);
-                        recuperado = true;
-                        break; // Sucesso! Não precisa pedir pro próximo.
+                    if (nodeState != null && nodeState.containsKey("version")) {
+                        long noVersion = ((Number) nodeState.get("version")).longValue();
+                        System.out.printf("🔍 [%s] Resposta recebida de %s na versão v%d.%n", myServerId, node, noVersion);
+
+                        if (noVersion > maiorVersaoEncontrada) {
+                            maiorVersaoEncontrada = noVersion;
+                            vencedorState = nodeState;
+                            noVencedor = node;
+                        }
                     }
                 } catch (Exception e) {
-                    System.out.printf("⚠️ [%s] Falha ao tentar extrair estado do %s.%n", myServerId, node);
+                    System.out.printf("⚠️ [%s] Nó %s inacessível ou offline durante recuperação.%n", myServerId, node);
                 }
             }
         }
 
-        if (!recuperado) {
-            System.out.printf("⚠️ [%s] Nenhum par vivo encontrado. Iniciando memória limpa.%n", myServerId);
+        // Importa estritamente a maior versão lógica para garantir a consistência de dados
+        if (vencedorState != null) {
+            lockService.importState(vencedorState);
+            System.out.printf("✅ [%s] Consenso atingido. Estado importado de %s na versão v%d.%n", myServerId, noVencedor, maiorVersaoEncontrada);
+        } else {
+            System.out.printf("⚠️ [%s] Nenhum backup disponível respondeu. Mantendo memória limpa.%n", myServerId);
         }
 
-        lockService.setCrashed(false); // Libera as rotas REST para voltar a operar
-        System.out.printf("🛡️ [%s] Recuperação finalizada. Atuando como BACKUP (disponível).%n", myServerId);
+        lockService.setCrashed(false);
+        System.out.printf("🛡️ [%s] Servidor reincorporado e pronto para operação como BACKUP ativo.%n", myServerId);
     }
 }

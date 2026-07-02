@@ -5,7 +5,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.server.ResponseStatusException;
-
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -25,143 +24,81 @@ public class LockController {
         this.serverList = Arrays.asList(System.getenv("SERVER_LIST").split(","));
     }
 
-    // ENDPOINTS DE CLIENTES
     @PostMapping("/{resourceId}")
     public boolean acquireLock(@PathVariable String resourceId, @RequestParam String clientId) {
+        if (lockService.isCrashed()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Offline.");
 
-        if (lockService.isCrashed()) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Simulação de falha isolada.");
-        }
-
-        System.out.printf("👑 [%s] (PRIMARY) Requisição de LOCK de %s para '%s'.%n", serverId, clientId, resourceId);
         boolean granted = lockService.tryLock(resourceId, clientId);
-        if (granted) replicateLockToBackups(resourceId, clientId);
+        if (granted) replicateToBackups("LOCK", resourceId, clientId);
         return granted;
     }
 
     @DeleteMapping("/{resourceId}")
     public void releaseLock(@PathVariable String resourceId, @RequestParam String clientId) {
-
         if (lockService.isCrashed()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
 
-        System.out.printf("👑 [%s] (PRIMARY) Requisição de UNLOCK de %s para '%s'.%n", serverId, clientId, resourceId);
-
         boolean released = lockService.unlock(resourceId, clientId);
-
-        // Replica para backup apenas se liberado com sucesso (legitimo)
-        if (released) {
-            replicateUnlockToBackups(resourceId);
-        }
-    }
-
-    private void replicateLockToBackups(String resourceId, String clientId) {
-
-        System.out.printf("🔄 [%s] Sincronizando estado (LOCK) com backups...%n", serverId);
-
-        for (String node : serverList) {
-            if (!node.contains(System.getenv("SERVER_ID"))) { // Ignora a si mesmo
-                try {
-                    restClient.post()
-                            .uri(node + "/api/lock/" + resourceId + "/sync?clientId=" + clientId)
-                            .retrieve()
-                            .toBodilessEntity();
-                } catch (Exception e) {
-                    System.out.printf("⚠️ [%s] Falha ao sincronizar LOCK com backup %s%n", serverId, node);
-                }
-            }
-        }
-    }
-
-    private void replicateUnlockToBackups(String resourceId) {
-
-        System.out.printf("🔄 [%s] Sincronizando estado (UNLOCK) com backups...%n", serverId);
-
-        for (String node : serverList) {
-            if (!node.contains(System.getenv("SERVER_ID"))) { // Ignora a si mesmo
-                try {
-                    restClient.delete()
-                            .uri(node + "/api/lock/" + resourceId + "/sync")
-                            .retrieve()
-                            .toBodilessEntity();
-                } catch (Exception e) {
-                    System.out.printf("⚠️ [%s] Falha ao sincronizar UNLOCK com backup %s%n", serverId, node);
-                }
-            }
-        }
+        if (released) replicateToBackups("UNLOCK", resourceId, null);
     }
 
     @PutMapping("/{resourceId}/renew")
     public boolean renewLock(@PathVariable String resourceId, @RequestParam String clientId) {
-
-        if (lockService.isCrashed()) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Simulação de falha isolada.");
-        }
-        System.out.printf("👑 [%s] (PRIMARY) Requisição de RENEW de %s para '%s'.%n", serverId, clientId, resourceId);
+        if (lockService.isCrashed()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
 
         boolean renewed = lockService.renew(resourceId, clientId);
-
-        if (renewed) {
-            replicateRenewToBackups(resourceId, clientId);
-        }
+        if (renewed) replicateToBackups("RENEW", resourceId, clientId);
         return renewed;
-    }
-
-    private void replicateRenewToBackups(String resourceId, String clientId) {
-
-        System.out.printf("🔄 [%s] Sincronizando estado (RENEW) com backups...%n", serverId);
-
-        for (String node : serverList) {
-            if (!node.contains(System.getenv("SERVER_ID"))) {
-
-                try {
-                    restClient.put()
-                            .uri(node + "/api/lock/" + resourceId + "/renew/sync?clientId=" + clientId)
-                            .retrieve()
-                            .toBodilessEntity();
-
-                } catch (Exception e) {
-                    System.out.printf("⚠️ [%s] Falha ao sincronizar RENEW com backup %s%n", serverId, node);
-                }
-            }
-        }
     }
 
     @GetMapping("/{resourceId}/status")
     public String getLockStatus(@PathVariable String resourceId) {
-
-        if (lockService.isCrashed()) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Simulação de falha isolada.");
-        }
-
+        if (lockService.isCrashed()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
         return lockService.getStatus(resourceId);
     }
 
-    // ENDPOINTS PARA SERVIDORES
-    @PostMapping("/{resourceId}/sync")
-    public void syncLock(@PathVariable String resourceId, @RequestParam String clientId) {
-        if (lockService.isCrashed()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
-
-        lockService.syncLock(resourceId, clientId);
-    }
-
-    @DeleteMapping("/{resourceId}/sync")
-    public void syncUnlock(@PathVariable String resourceId) {
-        if (lockService.isCrashed()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
-
-        lockService.syncUnlock(resourceId);
-    }
-
     @GetMapping("/state")
-    public Map<String, String> getClusterState() {
-        if (lockService.isCrashed()) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
-        }
+    public Map<String, Object> getClusterState() {
+        if (lockService.isCrashed()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
         return lockService.exportState();
     }
 
-    @PutMapping("/{resourceId}/renew/sync")
-    public void syncRenewLock(@PathVariable String resourceId, @RequestParam String clientId) {
+    // --- Endpoints de Sincronização Interna baseados em Versão ---
+
+    @PostMapping("/{resourceId}/sync")
+    public void syncLock(@PathVariable String resourceId, @RequestParam String clientId, @RequestParam long version) {
         if (lockService.isCrashed()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
-        lockService.syncRenew(resourceId, clientId);
+        lockService.syncLock(resourceId, clientId, version);
+    }
+
+    @DeleteMapping("/{resourceId}/sync")
+    public void syncUnlock(@PathVariable String resourceId, @RequestParam long version) {
+        if (lockService.isCrashed()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
+        lockService.syncUnlock(resourceId, version);
+    }
+
+    @PutMapping("/{resourceId}/renew/sync")
+    public void syncRenewLock(@PathVariable String resourceId, @RequestParam String clientId, @RequestParam long version) {
+        if (lockService.isCrashed()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
+        lockService.syncRenew(resourceId, clientId, version);
+    }
+
+    private void replicateToBackups(String action, String resourceId, String clientId) {
+        long currentVersion = lockService.getStateVersion();
+        for (String node : serverList) {
+            if (!node.contains(serverId)) {
+                try {
+                    String url = node + "/api/lock/" + resourceId + "/sync?version=" + currentVersion;
+                    if ("LOCK".equals(action)) {
+                        restClient.post().uri(url + "&clientId=" + clientId).retrieve().toBodilessEntity();
+                    } else if ("UNLOCK".equals(action)) {
+                        restClient.delete().uri(url).retrieve().toBodilessEntity();
+                    } else if ("RENEW".equals(action)) {
+                        restClient.put().uri(node + "/api/lock/" + resourceId + "/renew/sync?version=" + currentVersion + "&clientId=" + clientId).retrieve().toBodilessEntity();
+                    }
+                } catch (Exception e) {
+                    System.out.printf("⚠️ [%s] Falha de replicação síncrona com backup %s%n", serverId, node);
+                }
+            }
+        }
     }
 }
